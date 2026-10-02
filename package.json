@@ -1,0 +1,48 @@
+{
+  "name": "sql-migration-check",
+  "version": "1.0.0",
+  "description": "Read PostgreSQL migration files and report the statements that can lock a table, lose data or break running application code during a deploy: CREATE INDEX without CONCURRENTLY, NOT NULL columns without a default, type changes, constraints without NOT VALID, DROP, TRUNCATE, DELETE and UPDATE without WHERE, renames, ACCESS EXCLUSIVE locks. Each finding names the file and line and quotes the PostgreSQL manual. Reads files only, no dependencies.",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "sql-migration-check": "bin/sql-migration-check.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "docs",
+    "examples",
+    "research",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"test/*.test.js\"",
+    "check": "node tools/check.mjs",
+    "example": "node tools/example.mjs"
+  },
+  "keywords": [
+    "postgresql",
+    "sql",
+    "migrations",
+    "schema-migration",
+    "zero-downtime",
+    "database",
+    "linter",
+    "cli"
+  ],
+  "author": "INNERLUXES <info@innerluxes.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/INNERLUXES/sql-migration-check.git"
+  },
+  "homepage": "https://innerluxes.dev/software-development/databases"
+}
