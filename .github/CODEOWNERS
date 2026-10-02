@@ -1,0 +1,11 @@
+# Every change is reviewed by a maintainer.
+* @innerluxesdev
+
+# The names and sentences come from the PostgreSQL manual pages, and the tokenizer and the checks decide every line of the report; changes need extra care.
+/src/data.js @innerluxesdev
+/research/ @innerluxesdev
+/src/tokenizer.js @innerluxesdev
+/src/statements.js @innerluxesdev
+/src/files.js @innerluxesdev
+/src/rules.js @innerluxesdev
+/src/check.js @innerluxesdev
