@@ -1,0 +1,491 @@
+{
+  "tool": "sql-migration-check",
+  "version": "1.0.0",
+  "dialect": "PostgreSQL",
+  "manual": "https://www.postgresql.org/docs/current/",
+  "input": {
+    "files": [
+      {
+        "path": "examples/clinic-bookings/001_create_tables.sql",
+        "statements": 6,
+        "baseline": true
+      },
+      {
+        "path": "examples/clinic-bookings/002_speed_up_lookups.sql",
+        "statements": 4,
+        "baseline": false
+      },
+      {
+        "path": "examples/clinic-bookings/003_patient_details.sql",
+        "statements": 6,
+        "baseline": false
+      },
+      {
+        "path": "examples/clinic-bookings/004_cleanup.sql",
+        "statements": 9,
+        "baseline": false
+      },
+      {
+        "path": "examples/clinic-bookings/005_finishing_touches.sql",
+        "statements": 3,
+        "baseline": false
+      }
+    ],
+    "statements": 22,
+    "checked": 19,
+    "recognized": 3,
+    "unparsed": 0
+  },
+  "findings": [
+    {
+      "id": "index-not-concurrent",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/002_speed_up_lookups.sql",
+      "line": 3,
+      "statement": "CREATE INDEX",
+      "table": "appointments",
+      "message": "CREATE INDEX on appointments is not CONCURRENTLY, so writes to appointments wait until the index is built.",
+      "fix": "Use CREATE INDEX CONCURRENTLY, in a migration that does not run inside a transaction block.",
+      "manual": [
+        {
+          "page": "CREATE INDEX",
+          "section": "Parameters",
+          "url": "https://www.postgresql.org/docs/current/sql-createindex.html",
+          "quote": "When this option is used, PostgreSQL will build the index without taking any locks that prevent concurrent inserts, updates, or deletes on the table; whereas a standard index build locks out writes (but not reads) on the table until it's done."
+        }
+      ]
+    },
+    {
+      "id": "concurrently-in-transaction",
+      "severity": "error",
+      "file": "examples/clinic-bookings/002_speed_up_lookups.sql",
+      "line": 4,
+      "statement": "CREATE INDEX CONCURRENTLY",
+      "table": "appointments",
+      "message": "CREATE INDEX CONCURRENTLY on appointments is written inside a transaction block (BEGIN at line 2). The manual says it cannot run in one, so the statement fails.",
+      "fix": "Move the statement out of the BEGIN ... COMMIT block, into a migration of its own that your tool does not wrap in a transaction.",
+      "manual": [
+        {
+          "page": "CREATE INDEX",
+          "section": "Building Indexes Concurrently",
+          "url": "https://www.postgresql.org/docs/current/sql-createindex.html",
+          "quote": "Another difference is that a regular CREATE INDEX command can be performed within a transaction block, but CREATE INDEX CONCURRENTLY cannot."
+        },
+        {
+          "page": "BEGIN",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-begin.html",
+          "quote": "BEGIN initiates a transaction block, that is, all statements after a BEGIN command will be executed in a single transaction until an explicit COMMIT or ROLLBACK is given."
+        }
+      ]
+    },
+    {
+      "id": "add-column-not-null-no-default",
+      "severity": "error",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 2,
+      "statement": "ALTER TABLE ADD COLUMN",
+      "table": "patients",
+      "message": "ADD COLUMN phone is NOT NULL and has no DEFAULT. The manual says a column without a default is filled with NULL and that a NOT NULL column cannot hold null values, so the statement fails when patients already has rows (this conclusion is the tool's own).",
+      "fix": "Add the column with a constant DEFAULT, or without NOT NULL, fill the existing rows in batches, and add NOT NULL in a later migration.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "If no column constraints are specified, NULL is used as the DEFAULT."
+        },
+        {
+          "page": "CREATE TABLE",
+          "section": "Parameters",
+          "url": "https://www.postgresql.org/docs/current/sql-createtable.html",
+          "quote": "The column is not allowed to contain null values."
+        }
+      ]
+    },
+    {
+      "id": "add-column-volatile-default",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 3,
+      "statement": "ALTER TABLE ADD COLUMN",
+      "table": "patients",
+      "message": "The DEFAULT of ADD COLUMN created_at calls clock_timestamp(), which the manual names as volatile. A volatile DEFAULT rewrites the entire table and its indexes.",
+      "fix": "Add the column without a default (or with a constant one), fill the existing rows in batches, then set the default for new rows with ALTER COLUMN ... SET DEFAULT.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Adding a column with a volatile DEFAULT (e.g., clock_timestamp()), a stored generated column, an identity column, or a column with a domain data type that has constraints will cause the entire table and its indexes to be rewritten."
+        },
+        {
+          "page": "36.7. Function Volatility Categories",
+          "section": "36.7. Function Volatility Categories",
+          "url": "https://www.postgresql.org/docs/current/xfunc-volatility.html",
+          "quote": "Even a function with no side-effects needs to be labeled VOLATILE if its value can change within a single query; some examples are random(), currval(), timeofday()."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "The new default value will only apply in subsequent INSERT or UPDATE commands; it does not cause rows already in the table to change."
+        }
+      ]
+    },
+    {
+      "id": "alter-column-type",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 4,
+      "statement": "ALTER TABLE ALTER COLUMN TYPE",
+      "table": "patients",
+      "message": "ALTER COLUMN date_of_birth TYPE can rewrite patients and its indexes. The manual says it will normally do so, except when the USING clause does not change the contents and the old type is binary coercible to the new one, which the tool cannot judge.",
+      "fix": "Add a column of the new type, copy the values in batches, move the application to it and drop the old column in a later migration; or confirm that this change needs no rewrite.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Changing the type of an existing column will normally cause the entire table and its indexes to be rewritten."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "An ACCESS EXCLUSIVE lock is acquired unless explicitly noted."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Table and/or index rebuilds may take a significant amount of time for a large table, and will temporarily require as much as double the disk space."
+        }
+      ]
+    },
+    {
+      "id": "set-not-null",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 5,
+      "statement": "ALTER TABLE ALTER COLUMN SET NOT NULL",
+      "table": "patients",
+      "message": "SET NOT NULL on email scans all of patients to check that no row holds NULL, while the ALTER TABLE lock is held.",
+      "fix": "Add CHECK (email IS NOT NULL) NOT VALID, run VALIDATE CONSTRAINT on it, then SET NOT NULL: the manual says the scan is skipped when a valid CHECK constraint proves that no NULL can exist.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Ordinarily this is checked during the ALTER TABLE by scanning the entire table, unless NOT VALID is specified; however, if a valid CHECK constraint exists (and is not dropped in the same command) which proves no NULL can exist, then the table scan is skipped."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "An ACCESS EXCLUSIVE lock is acquired unless explicitly noted."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "With NOT VALID, the ADD CONSTRAINT command does not scan the table and can be committed immediately. After that, a VALIDATE CONSTRAINT command can be issued to verify that existing rows satisfy the constraint."
+        }
+      ]
+    },
+    {
+      "id": "add-constraint-without-not-valid",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 7,
+      "statement": "ALTER TABLE ADD CONSTRAINT",
+      "table": "appointments",
+      "message": "ADD FOREIGN KEY constraint without NOT VALID scans all of appointments to check the existing rows, and updates to the table are locked out until the statement is committed. A foreign key also takes a lock on the referenced table.",
+      "fix": "Add the constraint with NOT VALID, then run ALTER TABLE ... VALIDATE CONSTRAINT in a separate statement.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Scanning a large table to verify new foreign-key, check, or not-null constraints can take a long time, and other updates to the table are locked out until the ALTER TABLE ADD CONSTRAINT command is committed."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "With NOT VALID, the ADD CONSTRAINT command does not scan the table and can be committed immediately. After that, a VALIDATE CONSTRAINT command can be issued to verify that existing rows satisfy the constraint."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Although most forms of ADD table_constraint require an ACCESS EXCLUSIVE lock, ADD FOREIGN KEY requires only a SHARE ROW EXCLUSIVE lock."
+        }
+      ]
+    },
+    {
+      "id": "add-constraint-without-not-valid",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/003_patient_details.sql",
+      "line": 9,
+      "statement": "ALTER TABLE ADD CONSTRAINT",
+      "table": "appointments",
+      "message": "ADD CHECK constraint without NOT VALID scans all of appointments to check the existing rows, and updates to the table are locked out until the statement is committed.",
+      "fix": "Add the constraint with NOT VALID, then run ALTER TABLE ... VALIDATE CONSTRAINT in a separate statement.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "Scanning a large table to verify new foreign-key, check, or not-null constraints can take a long time, and other updates to the table are locked out until the ALTER TABLE ADD CONSTRAINT command is committed."
+        },
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "With NOT VALID, the ADD CONSTRAINT command does not scan the table and can be committed immediately. After that, a VALIDATE CONSTRAINT command can be issued to verify that existing rows satisfy the constraint."
+        }
+      ]
+    },
+    {
+      "id": "rename-column",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 2,
+      "statement": "ALTER TABLE RENAME COLUMN",
+      "table": "appointments",
+      "message": "RENAME COLUMN starts_at TO start_time on appointments. Running application code, and the version of it that is still deployed, uses the old name and fails.",
+      "fix": "Expand and contract: add the new column, write to both, backfill, move the application to the new name, and drop the old column in a later migration; or rename only when no old version of the application is running.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "The RENAME forms change the name of a table (or an index, sequence, view, materialized view, or foreign table), the name of an individual column in a table, or the name of a constraint of the table."
+        }
+      ]
+    },
+    {
+      "id": "drop-column",
+      "severity": "error",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 3,
+      "statement": "ALTER TABLE DROP COLUMN",
+      "table": "appointments",
+      "message": "DROP COLUMN notes on appointments deletes the data of the column, and running application code that still reads or writes it fails.",
+      "fix": "Expand and contract: stop all reads and writes of the column in the application first, keep the column for one release, copy what you need elsewhere, and drop it in a later migration.",
+      "manual": [
+        {
+          "page": "5.7. Modifying Tables",
+          "section": "5.7.2. Removing a Column",
+          "url": "https://www.postgresql.org/docs/current/ddl-alter.html",
+          "quote": "Whatever data was in the column disappears. Table constraints involving the column are dropped, too."
+        }
+      ]
+    },
+    {
+      "id": "drop-table",
+      "severity": "error",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 4,
+      "statement": "DROP TABLE",
+      "table": "legacy_waitlist",
+      "message": "DROP TABLE removes legacy_waitlist with its indexes, rules, triggers and constraints, and all of its data. Running application code that still reads or writes it fails.",
+      "fix": "Expand and contract: stop all reads and writes in the application first, keep the table for one release (or rename it out of the way), copy what you need elsewhere, and drop it in a later migration.",
+      "manual": [
+        {
+          "page": "DROP TABLE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-droptable.html",
+          "quote": "DROP TABLE always removes any indexes, rules, triggers, and constraints that exist for the target table."
+        },
+        {
+          "page": "13.3. Explicit Locking",
+          "section": "13.3.1. Table-Level Locks",
+          "url": "https://www.postgresql.org/docs/current/explicit-locking.html",
+          "quote": "Acquired by the DROP TABLE, TRUNCATE, REINDEX, CLUSTER, VACUUM FULL, and REFRESH MATERIALIZED VIEW (without CONCURRENTLY) commands."
+        }
+      ]
+    },
+    {
+      "id": "truncate",
+      "severity": "error",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 5,
+      "statement": "TRUNCATE",
+      "table": "reminders",
+      "message": "TRUNCATE removes all rows of reminders and takes an ACCESS EXCLUSIVE lock on each table, which blocks all other concurrent operations on it.",
+      "fix": "Make sure that the data is meant to go. On a table that is in use, delete the rows in batches with a WHERE clause instead.",
+      "manual": [
+        {
+          "page": "TRUNCATE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-truncate.html",
+          "quote": "TRUNCATE quickly removes all rows from a set of tables."
+        },
+        {
+          "page": "TRUNCATE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-truncate.html",
+          "quote": "TRUNCATE acquires an ACCESS EXCLUSIVE lock on each table it operates on, which blocks all other concurrent operations on the table."
+        },
+        {
+          "page": "TRUNCATE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-truncate.html",
+          "quote": "If concurrent access to a table is required, then the DELETE command should be used instead."
+        }
+      ]
+    },
+    {
+      "id": "delete-without-where",
+      "severity": "error",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 6,
+      "statement": "DELETE",
+      "table": "appointments",
+      "message": "DELETE FROM appointments has no WHERE clause, so it deletes every row of the table.",
+      "fix": "Add a WHERE clause. If every row is meant to go, say so in a comment, and on a large table delete in batches.",
+      "manual": [
+        {
+          "page": "DELETE",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-delete.html",
+          "quote": "If the WHERE clause is absent, the effect is to delete all rows in the table."
+        }
+      ]
+    },
+    {
+      "id": "update-without-where",
+      "severity": "error",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 7,
+      "statement": "UPDATE",
+      "table": "patients",
+      "message": "UPDATE patients has no WHERE clause, so it changes every row of the table.",
+      "fix": "Add a WHERE clause. If every row is meant to change, say so in a comment, and on a large table update in batches.",
+      "manual": [
+        {
+          "page": "UPDATE",
+          "section": "Parameters",
+          "url": "https://www.postgresql.org/docs/current/sql-update.html",
+          "quote": "Only rows for which this expression returns true will be updated."
+        }
+      ]
+    },
+    {
+      "id": "lock-table-access-exclusive",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 8,
+      "statement": "LOCK TABLE",
+      "table": "rooms",
+      "message": "LOCK TABLE rooms takes the ACCESS EXCLUSIVE lock, which conflicts with locks of all modes and blocks even a plain SELECT, until the transaction ends.",
+      "fix": "Take the weakest lock mode that does the job, or remove the statement when the command that follows takes the lock it needs by itself.",
+      "manual": [
+        {
+          "page": "13.3. Explicit Locking",
+          "section": "13.3.1. Table-Level Locks",
+          "url": "https://www.postgresql.org/docs/current/explicit-locking.html",
+          "quote": "Conflicts with locks of all modes (ACCESS SHARE, ROW SHARE, ROW EXCLUSIVE, SHARE UPDATE EXCLUSIVE, SHARE, SHARE ROW EXCLUSIVE, EXCLUSIVE, and ACCESS EXCLUSIVE). This mode guarantees that the holder is the only transaction accessing the table in any way."
+        },
+        {
+          "page": "13.3. Explicit Locking",
+          "section": "13.3.1. Table-Level Locks",
+          "url": "https://www.postgresql.org/docs/current/explicit-locking.html",
+          "quote": "Only an ACCESS EXCLUSIVE lock blocks a SELECT (without FOR UPDATE/SHARE) statement."
+        }
+      ]
+    },
+    {
+      "id": "vacuum-full",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 9,
+      "statement": "VACUUM FULL",
+      "table": "appointments",
+      "message": "VACUUM FULL rewrites appointments into a new file and holds an ACCESS EXCLUSIVE lock on each table while it does.",
+      "fix": "Use a plain VACUUM, which does not take that lock, or run VACUUM FULL in a maintenance window when no application is using the table.",
+      "manual": [
+        {
+          "page": "VACUUM",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-vacuum.html",
+          "quote": "VACUUM FULL rewrites the entire contents of the table into a new disk file with no extra space, allowing unused space to be returned to the operating system. This form is much slower and requires an ACCESS EXCLUSIVE lock on each table while it is being processed."
+        }
+      ]
+    },
+    {
+      "id": "cluster",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/004_cleanup.sql",
+      "line": 10,
+      "statement": "CLUSTER",
+      "table": "appointments",
+      "message": "CLUSTER rewrites appointments and holds an ACCESS EXCLUSIVE lock on it, so no other session can read or write the table until it is finished.",
+      "fix": "Run CLUSTER in a maintenance window when no application is using the table.",
+      "manual": [
+        {
+          "page": "CLUSTER",
+          "section": "Description",
+          "url": "https://www.postgresql.org/docs/current/sql-cluster.html",
+          "quote": "When a table is being clustered, an ACCESS EXCLUSIVE lock is acquired on it. This prevents any other database operations (both reads and writes) from operating on the table until the CLUSTER is finished."
+        }
+      ]
+    },
+    {
+      "id": "validate-constraint",
+      "severity": "info",
+      "file": "examples/clinic-bookings/005_finishing_touches.sql",
+      "line": 2,
+      "statement": "ALTER TABLE VALIDATE CONSTRAINT",
+      "table": "appointments",
+      "message": "VALIDATE CONSTRAINT appointments_patient_fk checks the existing rows of appointments. It takes only a SHARE UPDATE EXCLUSIVE lock, so writes continue; it is the second step of the NOT VALID pattern.",
+      "fix": "No change is needed. Run it in a migration of its own, so that the scan does not hold up other changes.",
+      "manual": [
+        {
+          "page": "ALTER TABLE",
+          "section": "Notes",
+          "url": "https://www.postgresql.org/docs/current/sql-altertable.html",
+          "quote": "The validation step does not need to lock out concurrent updates, since it knows that other transactions will be enforcing the constraint for rows that they insert or update; only pre-existing rows need to be checked. Hence, validation acquires only a SHARE UPDATE EXCLUSIVE lock on the table being altered."
+        }
+      ]
+    },
+    {
+      "id": "do-block-not-read",
+      "severity": "info",
+      "file": "examples/clinic-bookings/005_finishing_touches.sql",
+      "line": 4,
+      "statement": "DO",
+      "table": null,
+      "message": "The body of a DO block is not read, so a statement inside it is not checked.",
+      "fix": "Write the statements in the migration file itself, outside the DO block, so that they are checked.",
+      "manual": []
+    },
+    {
+      "id": "missing-terminator",
+      "severity": "warning",
+      "file": "examples/clinic-bookings/005_finishing_touches.sql",
+      "line": 10,
+      "statement": "INSERT",
+      "table": null,
+      "message": "The last statement of the file is not ended with a semicolon.",
+      "fix": "End the statement with a semicolon, so that where it ends is not left to the tool that runs the file.",
+      "manual": []
+    }
+  ],
+  "notes": [
+    "1 file before examples/clinic-bookings/002_speed_up_lookups.sql was read only to learn which tables already exist; nothing in it is reported",
+    "3 statements were understood but have no check (for example SELECT, INSERT and CREATE TABLE)"
+  ],
+  "counts": {
+    "error": 7,
+    "warning": 11,
+    "info": 2
+  },
+  "gate": {
+    "failOn": "error",
+    "pass": false,
+    "reason": "7 errors"
+  }
+}
